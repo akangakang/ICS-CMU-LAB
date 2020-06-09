@@ -1,0 +1,50 @@
+#name:Liu Shuchang
+#ID:518021910789
+
+# Execution begins at address 0
+	.pos 0
+	irmovq stack, %rsp
+	call main 
+	halt
+
+	.align 8 
+# Source block
+src:
+	.quad 0x00a
+	.quad 0x0b0
+	.quad 0xc00
+
+# Destination block
+dest:
+	.quad 0x111
+	.quad 0x222
+	.quad 0x333
+main:
+    irmovq src, %rdi	# src in %rdi 
+	irmovq dest, %rsi 	# dest in %rsi
+	irmovq $4, %rdx		# len=4 in %rdx
+	call copy_block
+	ret
+
+# long copy_block (long *src, long *dest , long len)
+copy_block:
+	irmovq $8, %r8		# 8 in %r8 
+	irmovq $1, %r9		# 1 in %r9
+	xorq %rax, %rax 	# result in %rax = 0
+	subq %r9, %rdx          # compare 1 and len  len>=1
+	jmp test
+loop:
+	mrmovq (%rdi), %rcx	# val in %rcx
+	addq %r8, %rdi		# src++  +8!
+	rmmovq %rcx, (%rsi)	
+	addq %r8, %rsi		# dest++  +8!
+	xorq %rcx, %rax
+	subq %r9, %rdx
+
+test:
+	jne loop            	# len !=0 
+	ret
+
+	.pos 0x200
+stack:
+

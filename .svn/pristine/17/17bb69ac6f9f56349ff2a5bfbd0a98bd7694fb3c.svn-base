@@ -1,0 +1,105 @@
+/*
+ * BUG#0
+ * description: 
+     miss semicolon
+ * location: 
+ *   int a = 10  (line 18)
+ * evidence: 
+ *   test.c:19: error: two or more data types in declaration specifiers
+ */
+
+BUG#1
+description:
+miss ; after typedef
+location:
+typedef struct record{
+} record_t
+evidence:
+gen_sort.c:54:9:error: expect ;
+
+
+BUG#2
+description:
+use record
+location:
+gen_rec(record *rec)  (line 114)
+evidence:
+gen.sort.c:114:5:error: unknow type of record
+
+
+BUG#3
+description:
+miss ; 
+location:
+enum {} (line 52)
+evidence:
+expect ; 
+
+
+BUG#4
+description:
+need to include <stdio.h>
+location:
+line 42
+evidence:
+gen_sort.c :42:1: +#include <stdio.h>
+
+
+
+BUG#5
+description:
+wrong {} matching
+location:
+line 195
+evidence:
+gen_sort.c:195:2error: expected identifir or ( before while
+
+
+BUG#6
+description:
+use i instead of j
+location:
+for(j=0;j<10;i++)
+evidence:
+printf("finish pad“") 在函数结束输出 但没有输出
+
+
+
+BUG#7
+description:
+rec_len is wrong
+location:
+line 50  
+rec_len= key_len + pad_len ;
+evidence:
+报错： 段错误
+
+
+
+BUG#8
+description:
+动态开辟空间时 buf 的空间太小 应开为  buf_size
+location:
+line 197 
+evidence:
+段错误
+
+
+
+BUG#9
+description:
+文件打开方式错误
+location:
+line 203  FILE *file = fopen (fn,"w")
+evidence:
+error : write to outfile
+
+
+
+BUG#10
+description:
+for循环多了等号
+location:
+line 156 cnt<=buf_nrec
+evidence:
+段错误

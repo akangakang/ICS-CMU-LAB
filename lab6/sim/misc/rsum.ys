@@ -1,0 +1,48 @@
+# name:Liu Shuchang
+#ID:518021910789
+
+# Execution begins at address 0
+	.pos 0
+	irmovq stack, %rsp
+	call main 
+	halt
+
+# Sample linked list
+.align 8
+ele1:
+	.quad 0x00a
+	.quad ele2
+ele2:
+	.quad 0x0b0
+	.quad ele3
+ele3:
+	.quad 0xc00
+	.quad 0
+
+main:
+	irmovq ele1, %rdi
+	call rsum_list
+	ret
+
+# long rsum_list(list_ptr ls)
+# ls in %rdi
+rsum_list:
+	andq %rdi, %rdi 	# test if ls==0
+	jne 	else		# if ls!=0 goto else 
+	xorq %rax, %rax		# if ls==0 , return 0
+	ret
+
+else:
+	pushq %rbp              # MUST!!!!  this rsum_list can be caller or callee !!
+	mrmovq (%rdi), %rbp 	# val = ls -> val ,  val in %rbp 
+	mrmovq 8(%rdi), %rdi    # %rdi = ls -> next
+	call rsum_list		# rest in %rax
+	addq %rbp, %rax
+	popq %rbp               # MUST!!!!
+	ret 
+
+	.pos 0x200
+stack:
+
+	
+	

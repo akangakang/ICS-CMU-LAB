@@ -1,0 +1,340 @@
+/*
+ * proxy.c - ICS Web proxy
+ *
+ *
+ */
+#include "csapp.h"
+#include <stdarg.h>
+#include <sys/select.h>
+
+/*
+ * Function prototypes
+ */
+int parse_uri(char *uri, char *target_addr, char *path, char *port);
+void format_log_entry(char *logstring, struct sockaddr_in *sockaddr, char *uri, size_t size);
+
+typedef struct info
+{
+    int connfd;
+    struct sockaddr_in clientaddr;
+} info_t;
+/*
+TheRio_readn,Rio_readlineb,and Rio_writen error checking wrappers in csapp.c
+ are not appropriate for a realistic proxy 
+*/
+ssize_t Rio_readn_w(int fd, void* usrbuf, size_t n)
+{
+    ssize_t readn;
+    if(0 > (readn = rio_readn(fd, usrbuf, n)))
+    {
+        readn = 0;
+        fprintf(stderr, "Rio_readn error");
+    }
+    return readn;
+}
+ssize_t Rio_readnb_w(rio_t* rp, void* usrbuf, size_t n)
+{
+    ssize_t readnb;
+    if(0 > (readnb = rio_readnb(rp, usrbuf, n)))
+    {
+        readnb = 0;
+        fprintf(stderr, "Rio_readnb error\n");
+    }
+    return readnb;
+}
+ssize_t Rio_readlineb_w(rio_t* rp, void* usrbuf, size_t maxlen)
+{
+   ssize_t readlineb;
+    if(0 > (readlineb = rio_readlineb(rp, usrbuf, maxlen)))
+    {
+        readlineb = 0;
+        fprintf(stderr, "Rio_readlineb error\n");
+    }
+    return readlineb;
+}
+void Rio_writen_w(int fd, void* usrbuf, size_t n)
+{
+    if(n != rio_writen(fd, usrbuf, n))
+    {
+        fprintf(stderr, "Rio_writen error\n");
+    }
+}
+
+void doit(info_t* info)
+{
+    // take out the info and free 
+    int connfd=info->connfd;
+    struct sockaddr_in clientaddr=info->clientaddr;
+    Free(info);
+
+    rio_t client_rio, server_rio;
+    char buf[MAXLINE];
+    char method[MAXLINE],uri[MAXLINE],version[MAXLINE];
+    char hostname[MAXLINE],pathname[MAXLINE],port[MAXLINE];
+    int clientfd; // when doing as a client 
+    char request_line[MAXLINE];
+    
+
+    /*
+        do as a server
+        receive the info from the client
+    */
+    Rio_readinitb(&client_rio,connfd);
+    if(Rio_readlineb_w(&client_rio,buf,MAXLINE) == 0)
+    {
+        fprintf(stderr,"can't get requset line\n");
+        Close(connfd);
+        return;
+    }
+    
+    if(sscanf(buf, "%s%s%s", method, uri, version) != 3){
+        fprintf(stderr, "error: mismatched parameters-- buf:%s , method:%s , uri:%s,\n",buf,method,uri);
+
+        Close(connfd);
+        return;
+    }
+    
+    /* parse uri from get request */
+    if( parse_uri(uri,hostname,pathname,port)<0)
+    {
+        fprintf(stderr,"parse_uri error\n");
+        Close(connfd);
+        return;
+    }
+
+
+
+    /*
+        do as a client 
+        connect with the sever and receive the info sent from server
+    */
+    clientfd = Open_clientfd(hostname,port);
+    if(clientfd==-1)
+    {
+       fprintf(stderr,"can't connect to server");
+       Close(connfd);
+       return;
+    }
+
+    Rio_readinitb(&server_rio,clientfd);
+
+    /* form the request line and send*/
+    sprintf(request_line,"%s /%s %s\r\n",method,pathname,version);
+    Rio_writen_w(clientfd,request_line,strlen(request_line));
+
+    /* get the request header and send*/
+    int n=0;
+    int size=0;
+
+    while ( (n=Rio_readlineb_w(&client_rio,buf,MAXLINE)) !=0 )
+    {
+        Rio_writen_w(clientfd,buf,n);
+        
+         /* meet the end , break */
+        if(!strncmp("\r\n",buf,2))
+            break;    
+        /* get the size to record */
+        if(!strncmp("Content-Length",buf,14))
+        {
+            sscanf(buf+15,"%u",&size);
+        }
+
+       
+    }
+    if (n==0)
+    return;
+
+     /* request body*/
+       
+    for(int i = 0; i < size; i++)
+    {
+        if(0 < Rio_readnb_w(&client_rio, buf, 1))
+        {
+            Rio_writen_w(clientfd, buf, 1);
+        }
+    } 
+    
+        
+    
+
+    /*
+        do as a server
+        receive the info and send info back
+    */
+   int receive_size=0;
+   size=0;
+
+    while((n = Rio_readlineb_w(&server_rio, buf, MAXLINE)) !=0  && strcmp("\r\n", buf))
+    {
+        Rio_writen_w(connfd, buf, n);
+        receive_size += n;
+
+        if(!strncmp("Content-Length", buf, 14))
+        {
+            sscanf(buf+15, "%u", &size);
+        }
+    }
+    Rio_writen_w(connfd, "\r\n", 2);
+    receive_size += 2;
+    /* response body */
+    
+     if(0 == size)          // the body ends with 0\r\n if it is chunked
+    {
+        while(0 != (n = Rio_readlineb_w(&server_rio, buf, MAXLINE)))
+        {
+            Rio_writen_w(connfd, buf, n);
+            receive_size += n;
+            if(!strcmp("0\r\n", buf))
+            {
+                break;
+            }
+        }
+    }
+    else                            // or we can use content length to determine how many bytes to read
+    {
+       for(int i = 0; i < size; i++)
+    {
+        if(0 < Rio_readnb_w(&server_rio, buf, 1))
+        {
+            Rio_writen_w(connfd, buf, 1);
+        }
+    }
+    }
+        
+   
+    
+
+    receive_size+=size;
+    char logstring[MAXLINE];   
+    
+   
+    format_log_entry(logstring, &clientaddr, uri, receive_size);
+    printf("%s\n", logstring);
+    
+    
+    Close(connfd);
+    Close(clientfd);
+    return;
+
+}
+void*thread(void * vargp)
+{
+    Pthread_detach(Pthread_self());
+    doit((info_t*)vargp);
+    return NULL;
+}
+/*
+ * main - Main routine for the proxy program
+ */
+int main(int argc, char **argv)
+{
+    int listenfd;
+    
+    
+    info_t * info;
+    socklen_t clientlen=sizeof(struct sockaddr_in);
+    pthread_t tid;
+    int thread_id=0;
+    /* Check arguments */
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <port number>\n", argv[0]);
+        exit(0);
+    }
+  
+  
+
+    listenfd = Open_listenfd(argv[1]);
+     Signal(SIGPIPE,SIG_IGN);
+    while (1)
+    {
+        info=Malloc(sizeof(info_t));
+        
+        info->connfd=Accept(listenfd,(SA*)(&(info->clientaddr)),&clientlen);
+        Pthread_create(&tid,NULL,thread,info);
+        thread_id++;
+
+    }
+
+    Close(listenfd);
+    exit(0);
+    
+    
+}
+
+
+/*
+ * parse_uri - URI parser
+ *
+ * Given a URI from an HTTP proxy GET request (i.e., a URL), extract
+ * the host name, path name, and port.  The memory for hostname and
+ * pathname must already be allocated and should be at least MAXLINE
+ * bytes. Return -1 if there are any problems.
+ */
+int parse_uri(char *uri, char *hostname, char *pathname, char *port)
+{
+    char *hostbegin;
+    char *hostend;
+    char *pathbegin;
+    int len;
+
+    if (strncasecmp(uri, "http://", 7) != 0) {
+        hostname[0] = '\0';
+        return -1;
+    }
+
+    /* Extract the host name */
+    hostbegin = uri + 7;
+    hostend = strpbrk(hostbegin, " :/\r\n\0");
+    if (hostend == NULL)
+        return -1;
+    len = hostend - hostbegin;
+    strncpy(hostname, hostbegin, len);
+    hostname[len] = '\0';
+
+    /* Extract the port number */
+    if (*hostend == ':') {
+        char *p = hostend + 1;
+        while (isdigit(*p))
+            *port++ = *p++;
+        *port = '\0';
+    } else {
+        strcpy(port, "80");
+    }
+
+    /* Extract the path */
+    pathbegin = strchr(hostbegin, '/');
+    if (pathbegin == NULL) {
+        pathname[0] = '\0';
+    }
+    else {
+        pathbegin++;
+        strcpy(pathname, pathbegin);
+    }
+
+    return 0;
+}
+
+/*
+ * format_log_entry - Create a formatted log entry in logstring.
+ *
+ * The inputs are the socket address of the requesting client
+ * (sockaddr), the URI from the request (uri), the number of bytes
+ * from the server (size).
+ */
+void format_log_entry(char *logstring, struct sockaddr_in *sockaddr,
+                      char *uri, size_t size)
+{
+    time_t now;
+    char time_str[MAXLINE];
+    char host[INET_ADDRSTRLEN];
+
+    /* Get a formatted time string */
+    now = time(NULL);
+    strftime(time_str, MAXLINE, "%a %d %b %Y %H:%M:%S %Z", localtime(&now));
+
+    if (inet_ntop(AF_INET, &sockaddr->sin_addr, host, sizeof(host)) == NULL)
+        unix_error("Convert sockaddr_in to string representation failed\n");
+
+    /* Return the formatted log entry string */
+    sprintf(logstring, "%s: %s %s %zu", time_str, host, uri, size);
+}

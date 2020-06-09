@@ -1,0 +1,4 @@
+$ps x -o comm | sort -d
+$cat /usr/share/dict/words  | grep ^a | wc -w
+$ls -l -S -r /etc/*.conf | head -n 5
+$echo 'echo hello world!' >echo.sh; chmod +x echo.sh
